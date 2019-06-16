@@ -44,10 +44,10 @@ const (
 // DefaultSDConfig is the default EC2 SD configuration.
 var DefaultSDConfig = SDConfig{
 	RefreshInterval: model.Duration(10 * time.Second),
-	Db_ssl:          "disable",
-	DB_type:         "postgres",
-	Db_host:         "localhost",
-	DB_port:         "5432",
+	DBSsl:          "disable",
+	DBType:         "postgres",
+	DBHost:         "localhost",
+	DBPort:         "5432",
 	
 }
 
@@ -56,16 +56,17 @@ var DefaultSDConfig = SDConfig{
 // SDConfig is the configuration for EC2 based service discovery.
 type SDConfig struct {
 	RefreshInterval model.Duration `yaml:"refresh_interval,omitempty"`
-	Db_host         string         `yaml:"db_host"`
-	Db_password     string         `yaml:"db_password"`
+	DBHost         string         `yaml:"db_host"`
+	DBPassword     string         `yaml:"db_password"`
+	DBUser      string `yaml:"db_user"`
+	DBName      string `yaml:"db_name"`
+	DBSsl       string `yaml:"db_ssl"`
+	DBType      string `yaml:"db_type"`
+	DBPort      string `yaml:"db_port"`
+	MetricsPath string `yaml:"metrics_path"`
+	ShardID string `yaml:"shard_id"`
 
-	Db_user      string `yaml:"db_user"`
-	Db_name      string `yaml:"db_name"`
-	Db_ssl       string `yaml:"db_ssl"`
-	DB_type      string `yaml:"db_type"`
-	DB_port      string `yaml:"db_port"`
-	Metrics_path string `yaml:"metrics_path"`
-	logger       log.Logger
+	
 }
 
 // UnmarshalYAML implements the yaml.Unmarshaler interface.
@@ -84,35 +85,38 @@ func (c *SDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // the Discoverer interface.
 type Discovery struct {
 	*refresh.Discovery
-	db_host      string
-	db_password  string
-	db_user      string
-	db_name      string
-	db_ssl       string
-	db_type      string
-	metrics_path string
-	db_port      string
+	DBHost      string
+	DBPassword  string
+	DBUser      string
+	DBName      string
+	DBSsl       string
+	DBType      string
+	MetricsPath string
+	DBPort      string
+	ShardID string
 	logger       log.Logger
+
 }
 
 // NewDiscovery returns a new Database discovery which periodically refreshes its targets.
 func NewDiscovery(conf *SDConfig, logger log.Logger) *Discovery {
 
-	level.Error(logger).Log("msg", "Initiating database discovery,database host", conf.Db_host, conf.Db_name)
+	level.Error(logger).Log("msg", "Initiating database discovery,database host", conf.DBHost, conf.DBName)
 
 	fmt.Println("Initiating Database discovery")
 
 	d := &Discovery{
 
-		db_host:      conf.Db_host,
-		db_password:  conf.Db_password,
-		db_user:      conf.Db_user,
-		db_name:      conf.Db_name,
-		db_ssl:       conf.Db_ssl,
-		db_type:      conf.DB_type,
-		metrics_path: conf.Metrics_path,
+		DBHost:      conf.DBHost,
+		DBPassword:  conf.DBPassword,
+		DBUser:      conf.DBUser,
+		DBName:      conf.DBName,
+		DBSsl:       conf.DBSsl,
+		DBType:      conf.DBType,
+		MetricsPath: conf.MetricsPath,
 		logger:       logger,
-		db_port:      conf.DB_port,
+		DBPort:      conf.DBPort,
+		ShardID: conf.ShardID,
 	}
 	d.Discovery = refresh.NewDiscovery(
 		logger,
@@ -140,7 +144,7 @@ func (d *Discovery) refresh(ctx context.Context) ([]*targetgroup.Group, error) {
 		}
 		labels[model.AddressLabel] = model.LabelValue(val.host + ":" + val.port)
 		if val.path == "" {
-			labels[model.MetricsPathLabel] = model.LabelValue(d.metrics_path)
+			labels[model.MetricsPathLabel] = model.LabelValue(d.MetricsPath)
 		} else {
 			labels[model.MetricsPathLabel] = model.LabelValue(val.path)
 		}
@@ -154,21 +158,22 @@ func (d *Discovery) refresh(ctx context.Context) ([]*targetgroup.Group, error) {
 
 func query_db(d Discovery) []target {
 	var targetGroup []target
-	level.Info(d.logger).Log("msg", "Querying database", "DB_HOST", d.db_host, "DB", d.db_name, "DRIVER", d.db_type, "SSL", d.db_ssl)
+	level.Info(d.logger).Log("msg", "Querying database", "DbHost", d.DBHost, "DB", d.DBName, "DRIVER", d.DBType, "SSL", d.DBSsl)
 
-	//fmt.Printf("Query came for %s and %s",d.db_host)
+	//fmt.Printf("Query came for %s and %s",d.DbHost)
 	//connStr := "user=postgres dbname=postgres password=password  sslmode=disable host=192.168.1.2"
+	connStr:=fmt.Sprintf("user=%s dbname=%s password=%s sslmode=%s host=%s port=%s",d.DBUser,d.DBName,d.DBPassword,d.DBSsl,d.DBHost,d.DBPort)
 
-	connStr := "user=" + d.db_user + " dbname=" + d.db_name + " password=" + d.db_password + "  sslmode=" + d.db_ssl + " host=" + d.db_host + " port=" + d.db_port
+	//connStr := "user=" + d.DbUser + " dbname=" + d.DBName + " password=" + d.DbPassword + "  sslmode=" + d.Dbssl + " host=" + d.DbHost + " port=" + d.DBPort
 	//fmt.Printf("Connection string is %s",connStr)
 
-	db, _ := sql.Open(d.db_type, connStr)
+	db, _ := sql.Open(d.DBType, connStr)
 	defer db.Close()
 	db_err := db.Ping()
 
 	if db_err == nil {
 
-		rows, err := db.Query("SELECT host,port,path FROM public.prometheus")
+		rows, err := db.Query("SELECT host,port,path FROM public.prometheus where shard_id = ?",d.ShardID)
 
 		var targets target
 
@@ -191,7 +196,7 @@ func query_db(d Discovery) []target {
 
 	} else {
 
-		level.Error(d.logger).Log("msg", db_err, "DB_HOST", d.db_host, "Db", d.db_name)
+		level.Error(d.logger).Log("msg", db_err, "DBHost", d.DBHost, "Db", d.DBName)
 
 	}
 	return targetGroup
