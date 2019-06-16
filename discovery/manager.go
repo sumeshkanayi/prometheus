@@ -38,6 +38,7 @@ import (
 	"github.com/prometheus/prometheus/discovery/openstack"
 	"github.com/prometheus/prometheus/discovery/triton"
 	"github.com/prometheus/prometheus/discovery/zookeeper"
+	"github.com/prometheus/prometheus/discovery/postgres"
 )
 
 var (
@@ -406,6 +407,13 @@ func (m *Manager) registerProviders(cfg sd_config.ServiceDiscoveryConfig, setNam
 			return triton.New(log.With(m.logger, "discovery", "triton"), c)
 		})
 	}
+
+	for _, c := range cfg.PostgresSDConfigs {
+		add(c, func() (Discoverer, error) {
+			return postgres.NewDiscovery(c, log.With(m.logger, "discovery", "postgres")),nil
+		})
+	}
+
 	if len(cfg.StaticConfigs) > 0 {
 		add(setName, func() (Discoverer, error) {
 			return &StaticProvider{TargetGroups: cfg.StaticConfigs}, nil

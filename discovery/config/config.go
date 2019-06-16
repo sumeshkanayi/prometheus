@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/discovery/triton"
 	"github.com/prometheus/prometheus/discovery/zookeeper"
+	"github.com/prometheus/prometheus/discovery/postgres"
 )
 
 // ServiceDiscoveryConfig configures lists of different service discovery mechanisms.
@@ -58,6 +59,7 @@ type ServiceDiscoveryConfig struct {
 	AzureSDConfigs []*azure.SDConfig `yaml:"azure_sd_configs,omitempty"`
 	// List of Triton service discovery configurations.
 	TritonSDConfigs []*triton.SDConfig `yaml:"triton_sd_configs,omitempty"`
+	PostgresSDConfigs []*postgres.SDConfig `yaml:"postgres_sd_configs,omitempty"`
 }
 
 // Validate validates the ServiceDiscoveryConfig.
@@ -115,6 +117,12 @@ func (c *ServiceDiscoveryConfig) Validate() error {
 	for _, cfg := range c.ServersetSDConfigs {
 		if cfg == nil {
 			return errors.New("empty or null section in serverset_sd_configs")
+		}
+	}
+	
+	for _, cfg := range c.PostgresSDConfigs {
+		if cfg == nil {
+			return errors.New("empty or null section in postgres_sd_configs")
 		}
 	}
 	for _, cfg := range c.StaticConfigs {
