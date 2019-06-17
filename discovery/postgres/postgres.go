@@ -41,7 +41,7 @@ const (
 	hostname = model.MetaLabelPrefix + "hostname_"
 )
 
-// DefaultSDConfig is the default EC2 SD configuration.
+// DefaultSDConfig is the default Postgres SD configuration.
 var DefaultSDConfig = SDConfig{
 	RefreshInterval: model.Duration(10 * time.Second),
 	DBSsl:          "disable",
@@ -53,7 +53,7 @@ var DefaultSDConfig = SDConfig{
 
 // Filter is the configuration for filtering EC2 instances.
 
-// SDConfig is the configuration for EC2 based service discovery.
+// SDConfig is the configuration for Postgres based service discovery.
 type SDConfig struct {
 	RefreshInterval model.Duration `yaml:"refresh_interval,omitempty"`
 	DBHost         string         `yaml:"db_host"`
@@ -81,7 +81,7 @@ func (c *SDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
-// Discovery periodically performs EC2-SD requests. It implements
+// Discovery periodically performs Postgres-SD requests. It implements
 // the Discoverer interface.
 type Discovery struct {
 	*refresh.Discovery
@@ -130,7 +130,7 @@ func NewDiscovery(conf *SDConfig, logger log.Logger) *Discovery {
 
 func (d *Discovery) refresh(ctx context.Context) ([]*targetgroup.Group, error) {
 
-	targGroups := query_db(*d)
+	targGroups := queryDB(*d)
 
 	tg := &targetgroup.Group{
 		Source: "database",
@@ -156,7 +156,7 @@ func (d *Discovery) refresh(ctx context.Context) ([]*targetgroup.Group, error) {
 	return []*targetgroup.Group{tg}, nil
 }
 
-func query_db(d Discovery) []target {
+func queryDB(d Discovery) []target {
 	var targetGroup []target
 	level.Info(d.logger).Log("msg", "Querying database", "DbHost", d.DBHost, "DB", d.DBName, "DRIVER", d.DBType, "SSL", d.DBSsl)
 
@@ -169,9 +169,9 @@ func query_db(d Discovery) []target {
 
 	db, _ := sql.Open(d.DBType, connStr)
 	defer db.Close()
-	db_err := db.Ping()
+	dbErr := db.Ping()
 
-	if db_err == nil {
+	if dbErr == nil {
 
 		rows, err := db.Query("SELECT host,port,path FROM public.prometheus where shard_id = ?",d.ShardID)
 
@@ -196,7 +196,7 @@ func query_db(d Discovery) []target {
 
 	} else {
 
-		level.Error(d.logger).Log("msg", db_err, "DBHost", d.DBHost, "Db", d.DBName)
+		level.Error(d.logger).Log("msg", dbErr, "DBHost", d.DBHost, "Db", d.DBName)
 
 	}
 	return targetGroup
