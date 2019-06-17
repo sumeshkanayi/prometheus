@@ -25,16 +25,17 @@ import (
 	"github.com/prometheus/prometheus/discovery/refresh"
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 
-	"database/sql"
 	"fmt"
+	_"database/sql"
+    _"github.com/lib/pq"
+	"github.com/jmoiron/sqlx"
 
-	_ "github.com/lib/pq"
 )
 
 type target struct {
-	host string
-	port string
-	path string
+	Host string `db:"host"`
+	Port string `db:"port"`
+	Path string `db:"path"`
 }
 
 const (
@@ -136,17 +137,19 @@ func (d *Discovery) refresh(ctx context.Context) ([]*targetgroup.Group, error) {
 		Source: "database",
 	}
 
+	fmt.Println("tg is ",targGroups)
 	for _, val := range targGroups {
+		fmt.Println("values are ",val)
 
 		labels := model.LabelSet{
-
-			hostname: model.LabelValue(val.host),
+           
+			hostname: model.LabelValue(val.Host),
 		}
-		labels[model.AddressLabel] = model.LabelValue(val.host + ":" + val.port)
-		if val.path == "" {
+		labels[model.AddressLabel] = model.LabelValue(val.Host + ":" + val.Port)
+		if val.Path == "" {
 			labels[model.MetricsPathLabel] = model.LabelValue(d.MetricsPath)
 		} else {
-			labels[model.MetricsPathLabel] = model.LabelValue(val.path)
+			labels[model.MetricsPathLabel] = model.LabelValue(val.Path)
 		}
 
 		tg.Targets = append(tg.Targets, labels)
@@ -163,41 +166,39 @@ func queryDB(d Discovery) []target {
 	//fmt.Printf("Query came for %s and %s",d.DbHost)
 	//connStr := "user=postgres dbname=postgres password=password  sslmode=disable host=192.168.1.2"
 	connStr:=fmt.Sprintf("user=%s dbname=%s password=%s sslmode=%s host=%s port=%s",d.DBUser,d.DBName,d.DBPassword,d.DBSsl,d.DBHost,d.DBPort)
-
+	fmt.Println("connection string is",connStr)
+	fmt.Println("Shard id is",d.ShardID)
 	//connStr := "user=" + d.DbUser + " dbname=" + d.DBName + " password=" + d.DbPassword + "  sslmode=" + d.Dbssl + " host=" + d.DbHost + " port=" + d.DBPort
 	//fmt.Printf("Connection string is %s",connStr)
 
-	db, _ := sql.Open(d.DBType, connStr)
+	db,dbErr:=sqlx.Connect("postgres",connStr)
 	defer db.Close()
-	dbErr := db.Ping()
 
 	if dbErr == nil {
+		level.Info(d.logger).Log("shard", d.ShardID)
+		//where shardid = ?",d.ShardID
 
-		rows, err := db.Query("SELECT host,port,path FROM public.prometheus where shard_id = ?",d.ShardID)
+		//var targets target
+		var targetGroup []target
 
-		var targets target
+	tx := db.MustBegin()
 
-		if err == nil {
+	txExecErr:=tx.Select(&targetGroup,"SELECT host,port,path FROM public.metrics WHERE shardid=$1",d.ShardID)
+	fmt.Println("Target group is",targetGroup)
+	if txExecErr!=nil{
+		fmt.Println(txExecErr)
+	}
 
-			defer rows.Close()
-
-			for rows.Next() {
-
-				if err := rows.Scan(&targets.host, &targets.port, &targets.path); err != nil {
-					// Check for a scan error.
-					// Query rows will be closed with defer.
-
-				}
-				targetGroup = append(targetGroup, targets)
-
-			}
-
-		}
+	return targetGroup
+	
+			//	targetGroup = append(targetGroup, targets)		
 
 	} else {
 
 		level.Error(d.logger).Log("msg", dbErr, "DBHost", d.DBHost, "Db", d.DBName)
 
 	}
+	
 	return targetGroup
+	
 }
