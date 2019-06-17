@@ -40,6 +40,7 @@ type target struct {
 
 const (
 	hostname = model.MetaLabelPrefix + "hostname_"
+	retyInterval=10*time.Second
 )
 
 // DefaultSDConfig is the default Postgres SD configuration.
@@ -172,8 +173,10 @@ func queryDB(d Discovery) []target {
 	//fmt.Printf("Connection string is %s",connStr)
 
 	db,dbErr:=sqlx.Connect("postgres",connStr)
-	defer db.Close()
+	
 
+	
+	
 	if dbErr == nil {
 		level.Info(d.logger).Log("shard", d.ShardID)
 		//where shardid = ?",d.ShardID
@@ -181,12 +184,11 @@ func queryDB(d Discovery) []target {
 		//var targets target
 		var targetGroup []target
 
-	tx := db.MustBegin()
 
-	txExecErr:=tx.Select(&targetGroup,"SELECT host,port,path FROM public.metrics WHERE shardid=$1",d.ShardID)
+	dbSelectError:=db.Select(&targetGroup,"SELECT host,port,path FROM public.metrics WHERE shardid=$1",d.ShardID)
 	fmt.Println("Target group is",targetGroup)
-	if txExecErr!=nil{
-		fmt.Println(txExecErr)
+	if dbSelectError!=nil{
+		fmt.Println(dbSelectError)
 	}
 
 	return targetGroup
