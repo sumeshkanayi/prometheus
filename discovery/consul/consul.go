@@ -34,6 +34,7 @@ import (
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/util/strutil"
 	"github.com/lib/pq"
+	"github.com/prometheus/prometheus/discovery/postgres"
 )
 
 const (
@@ -163,6 +164,12 @@ func init() {
 // and updates them via watches.
 
 
+
+type DisoverArray struct{
+
+	Discover []*Discovery
+}
+
 type Discovery struct {
 	client           *consul.Client
 	clientDatacenter string
@@ -177,20 +184,31 @@ type Discovery struct {
 }
 
 // NewDiscovery returns a new Discovery for the given config.
-func NewDiscovery(conf *SDConfig, logger log.Logger) (*Discovery, error) {
+func NewDiscovery(conf *SDConfig, logger log.Logger) (*DisoverArray, error) {
 
-  fmt.Println("Conf is",conf)
+   var NewDiscoverArray DisoverArray
+   
+  
+   ConsulConfigs:=postgres.Query("consul","ms-03c1cf41")
+
+   fmt.Println(ConsulConfigs)
+
+   for _,consulConfig:=range ConsulConfigs{
+
+
+
+  fmt.Println("Conf is",consulConfig)
 
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
 
-	tls, err := config_util.NewTLSConfig(&conf.TLSConfig)
+	tls, err := config_util.NewTLSConfig(&DefaultSDConfig.TLSConfig)
 	if err != nil {
 		return nil, err
 	}
 	transport := &http.Transport{
-		IdleConnTimeout: 5 * time.Duration(conf.RefreshInterval),
+		IdleConnTimeout: 5 * time.Second,
 		TLSClientConfig: tls,
 		DialContext: conntrack.NewDialContextFunc(
 			conntrack.DialWithTracing(),
@@ -203,13 +221,13 @@ func NewDiscovery(conf *SDConfig, logger log.Logger) (*Discovery, error) {
 	}
 
 	clientConf := &consul.Config{
-		Address:    conf.Server,
-		Scheme:     conf.Scheme,
-		Datacenter: conf.Datacenter,
-		Token:      string(conf.Token),
+		Address:    consulConfig.Server,
+		Scheme:     "http",
+		Datacenter: consulConfig.Datacenter,
+		Token:      consulConfig.Token,
 		HttpAuth: &consul.HttpBasicAuth{
-			Username: conf.Username,
-			Password: string(conf.Password),
+			Username: "",
+			Password: "",
 		},
 		HttpClient: wrapper,
 	}
@@ -219,17 +237,23 @@ func NewDiscovery(conf *SDConfig, logger log.Logger) (*Discovery, error) {
 	}
 	cd := &Discovery{
 		client:           client,
-		tagSeparator:     conf.TagSeparator,
-		watchedServices:  conf.Services,
-		watchedTags:      conf.ServiceTags,
-		watchedNodeMeta:  conf.NodeMeta,
-		allowStale:       conf.AllowStale,
-		refreshInterval:  time.Duration(conf.RefreshInterval),
-		clientDatacenter: conf.Datacenter,
+		tagSeparator:    ",",
+		watchedServices:  consulConfig.Services,
+		watchedTags:      consulConfig.Tags,
+		watchedNodeMeta:  DefaultSDConfig.NodeMeta,
+		allowStale:       DefaultSDConfig.AllowStale,
+		refreshInterval:  10*time.Second,
+		clientDatacenter: consulConfig.Datacenter,
 		finalizer:        transport.CloseIdleConnections,
 		logger:           logger,
 	}
-	return cd, nil
+		
+	fmt.Println("CD is",*cd)
+	
+	NewDiscoverArray.Discover=append(NewDiscoverArray.Discover,cd)
+
+   }
+   return &NewDiscoverArray,nil
 }
 
 // shouldWatch returns whether the service of the given name should be watched.
@@ -323,13 +347,25 @@ func (d *Discovery) initialize(ctx context.Context) {
 }
 
 // Run implements the Discoverer interface.
-func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
+func (p *DisoverArray) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 
+
+	fmt.Println("Discover array is ",p.Discover)
+
+	for _,d:=range p.Discover{
+
+		level.Info(d.logger).Log("msg", "SIA", "tags")
+		fmt.Println("Watched tags",d.watchedTags)
+		fmt.Println("Watched servicess",d.watchedServices)
+	
+		
 
 	if d.finalizer != nil {
+		fmt.Println("Under finalizer")
 		defer d.finalizer()
 	}
 	d.initialize(ctx)
+	fmt.Println("Intializaed")
 
 	if len(d.watchedServices) == 0 || len(d.watchedTags) != 0 {
 		// We need to watch the catalog.
@@ -345,7 +381,9 @@ func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 				ticker.Stop()
 				return
 			default:
+
 				d.watchServices(ctx, ch, &lastIndex, services)
+				//Disabled by SUmesh
 				<-ticker.C
 			}
 		}
@@ -357,11 +395,13 @@ func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 		<-ctx.Done()
 	}
 }
+}
 
 // Watch the catalog for new services we would like to watch. This is called only
 // when we don't know yet the names of the services and need to ask Consul the
 // entire list of services.
 func (d *Discovery) watchServices(ctx context.Context, ch chan<- []*targetgroup.Group, lastIndex *uint64, services map[string]func()) {
+	fmt.Println("Called watch services",d.watchedTags,d.watchedServices)
 	catalog := d.client.Catalog()
 	level.Debug(d.logger).Log("msg", "Watching services", "tags", d.watchedTags)
 
@@ -416,7 +456,8 @@ func (d *Discovery) watchServices(ctx context.Context, ch chan<- []*targetgroup.
 			// Send clearing target group.
 			select {
 			case <-ctx.Done():
-				return
+				//sumes
+				//return
 			case ch <- []*targetgroup.Group{{Source: name}}:
 			}
 		}
@@ -457,7 +498,7 @@ func (d *Discovery) watchService(ctx context.Context, ch chan<- []*targetgroup.G
 			select {
 			case <-ctx.Done():
 				ticker.Stop()
-				return
+				//return
 			default:
 				srv.watch(ctx, ch, catalog, &lastIndex)
 				select {
@@ -487,7 +528,7 @@ func (srv *consulService) watch(ctx context.Context, ch chan<- []*targetgroup.Gr
 	// Check the context before in order to exit early.
 	select {
 	case <-ctx.Done():
-		return
+		//return
 	default:
 		// Continue.
 	}

@@ -17,13 +17,31 @@ import (
 	_ "database/sql"
 	"fmt"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
-	"github.com/prometheus/prometheus/discovery/consul"
+	"github.com/lib/pq"
+
 )
 
-func Query(class string, shard string) []*consul.SDConfig {
+type ConsulConfig struct{
 
-	var SDConfigs []*consul.SDConfig
+	Server string `db:"server"`
+	Tags pq.StringArray `db:"tags"`
+	Services pq.StringArray `db:"services"`
+	Datacenter string `db:"datacenter"`
+	Token string `db:"token"`
+
+
+
+
+}
+
+
+
+
+func Query(class string, shard string) []ConsulConfig {
+
+	fmt.Println("Called query")
+
+	var SDConfigs []ConsulConfig
 
 	connStr := fmt.Sprintf("user=%s dbname=%s password=%s sslmode=%s host=%s port=%s", "devops_admin", "devops_primary", "admin", "disable", "postgres.bdf-cloud.iqvia.net", "5432")
 	fmt.Println("connection string is", connStr)

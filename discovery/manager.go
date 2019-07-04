@@ -357,8 +357,8 @@ func (m *Manager) registerProviders(cfg sd_config.ServiceDiscoveryConfig, setNam
 			return file.NewDiscovery(c, log.With(m.logger, "discovery", "file")), nil
 		})
 	}
-	xx:=postgres.Query("consul","ms-03c1cf41")
-	for _, c := range xx {
+
+	for _, c := range cfg.ConsulSDConfigs {
 		add(c, func() (Discoverer, error) {
 			return consul.NewDiscovery(c, log.With(m.logger, "discovery", "consul"))
 		})
