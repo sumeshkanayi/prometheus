@@ -29,6 +29,8 @@ import (
 	_"database/sql"
     _"github.com/lib/pq"
 	"github.com/jmoiron/sqlx"
+	"strings"
+	configUtil "github.com/prometheus/common/config"
 
 )
 
@@ -36,11 +38,15 @@ type target struct {
 	Host string `db:"host"`
 	Port string `db:"port"`
 	Path string `db:"path"`
+	Labels string `db:"labels"
+	`
+
 }
 
 const (
 	hostname = model.MetaLabelPrefix + "hostname_"
-	retyInterval=10*time.Second
+	bdf = model.MetaLabelPrefix + "bdf_"
+
 )
 
 // DefaultSDConfig is the default Postgres SD configuration.
@@ -59,7 +65,7 @@ var DefaultSDConfig = SDConfig{
 type SDConfig struct {
 	RefreshInterval model.Duration `yaml:"refresh_interval,omitempty"`
 	DBHost         string         `yaml:"db_host"`
-	DBPassword     string         `yaml:"db_password"`
+	DBPassword     configUtil.Secret         `yaml:"db_password"`
 	DBUser      string `yaml:"db_user"`
 	DBName      string `yaml:"db_name"`
 	DBSsl       string `yaml:"db_ssl"`
@@ -110,7 +116,7 @@ func NewDiscovery(conf *SDConfig, logger log.Logger) *Discovery {
 	d := &Discovery{
 
 		DBHost:      conf.DBHost,
-		DBPassword:  conf.DBPassword,
+		DBPassword:  string(conf.DBPassword),
 		DBUser:      conf.DBUser,
 		DBName:      conf.DBName,
 		DBSsl:       conf.DBSsl,
@@ -132,7 +138,7 @@ func NewDiscovery(conf *SDConfig, logger log.Logger) *Discovery {
 
 func (d *Discovery) refresh(ctx context.Context) ([]*targetgroup.Group, error) {
 
-	targGroups := queryDB(*d)
+	targGroups := QueryDB(*d,"static")
 
 	tg := &targetgroup.Group{
 		Source: "database",
@@ -153,6 +159,20 @@ func (d *Discovery) refresh(ctx context.Context) ([]*targetgroup.Group, error) {
 			labels[model.MetricsPathLabel] = model.LabelValue(val.Path)
 		}
 
+		//If custom labesls are passed then add new labels
+		
+		 customLabels:=strings.Split(val.Labels,",")
+		 if len(customLabels) > 0{
+
+		 for _,cl:=range customLabels{
+			//Use correct naming here
+			parts := strings.Split(cl, "=")
+			labelKey:=model.LabelName(parts[0])
+			labelValue:=model.LabelValue(parts[1])
+			labels[labelKey]=model.LabelValue(labelValue)
+		 }
+		}
+
 		tg.Targets = append(tg.Targets, labels)
 
 	}
@@ -160,7 +180,7 @@ func (d *Discovery) refresh(ctx context.Context) ([]*targetgroup.Group, error) {
 	return []*targetgroup.Group{tg}, nil
 }
 
-func queryDB(d Discovery) []target {
+func QueryDB(d Discovery,class string) []target {
 	var targetGroup []target
 	level.Info(d.logger).Log("msg", "Querying database", "DbHost", d.DBHost, "DB", d.DBName, "DRIVER", d.DBType, "SSL", d.DBSsl)
 
@@ -173,6 +193,7 @@ func queryDB(d Discovery) []target {
 	//fmt.Printf("Connection string is %s",connStr)
 
 	db,dbErr:=sqlx.Connect("postgres",connStr)
+	defer db.Close()
 	
 
 	
@@ -185,7 +206,7 @@ func queryDB(d Discovery) []target {
 		var targetGroup []target
 
 
-	dbSelectError:=db.Select(&targetGroup,"SELECT host,port,path FROM public.metrics WHERE shardid=$1",d.ShardID)
+	dbSelectError:=db.Select(&targetGroup,"SELECT host,port,path,labels FROM public.metrics WHERE shardid=$1 AND type=$2",d.ShardID,class)
 	fmt.Println("Target group is",targetGroup)
 	if dbSelectError!=nil{
 		fmt.Println(dbSelectError)
@@ -195,11 +216,10 @@ func queryDB(d Discovery) []target {
 	
 			//	targetGroup = append(targetGroup, targets)		
 
-	} else {
-
+	} 
 		level.Error(d.logger).Log("msg", dbErr, "DBHost", d.DBHost, "Db", d.DBName)
 
-	}
+
 	
 	return targetGroup
 	

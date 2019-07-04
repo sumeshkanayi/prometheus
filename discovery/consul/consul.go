@@ -33,6 +33,7 @@ import (
 
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/util/strutil"
+	"github.com/lib/pq"
 )
 
 const (
@@ -93,11 +94,13 @@ var (
 	}
 )
 
+
+
 // SDConfig is the configuration for Consul service discovery.
 type SDConfig struct {
-	Server       string             `yaml:"server,omitempty"`
-	Token        config_util.Secret `yaml:"token,omitempty"`
-	Datacenter   string             `yaml:"datacenter,omitempty"`
+	Server       string             `yaml:"server,omitempty" db:"server"`
+	Token        config_util.Secret `yaml:"token,omitempty" db:"token"`
+	Datacenter   string             `yaml:"datacenter,omitempty" db:"datacenter"`
 	TagSeparator string             `yaml:"tag_separator,omitempty"`
 	Scheme       string             `yaml:"scheme,omitempty"`
 	Username     string             `yaml:"username,omitempty"`
@@ -115,14 +118,22 @@ type SDConfig struct {
 	// See https://www.consul.io/api/catalog.html#list-services
 	// The list of services for which targets are discovered.
 	// Defaults to all services if empty.
-	Services []string `yaml:"services,omitempty"`
+	Services pq.StringArray `yaml:"services,omitempty" db:"services"`
 	// A list of tags used to filter instances inside a service. Services must contain all tags in the list.
-	ServiceTags []string `yaml:"tags,omitempty"`
+	ServiceTags pq.StringArray `yaml:"tags,omitempty" db:"tags"`
+	
 	// Desired node metadata.
 	NodeMeta map[string]string `yaml:"node_meta,omitempty"`
 
 	TLSConfig config_util.TLSConfig `yaml:"tls_config,omitempty"`
 }
+
+
+
+
+
+
+
 
 // UnmarshalYAML implements the yaml.Unmarshaler interface.
 func (c *SDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -140,6 +151,7 @@ func (c *SDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 func init() {
 	prometheus.MustRegister(rpcFailuresCount)
+	
 	prometheus.MustRegister(rpcDuration)
 
 	// Initialize metric vectors.
@@ -149,6 +161,8 @@ func init() {
 
 // Discovery retrieves target information from a Consul server
 // and updates them via watches.
+
+
 type Discovery struct {
 	client           *consul.Client
 	clientDatacenter string
@@ -164,6 +178,9 @@ type Discovery struct {
 
 // NewDiscovery returns a new Discovery for the given config.
 func NewDiscovery(conf *SDConfig, logger log.Logger) (*Discovery, error) {
+
+  fmt.Println("Conf is",conf)
+
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
@@ -307,6 +324,8 @@ func (d *Discovery) initialize(ctx context.Context) {
 
 // Run implements the Discoverer interface.
 func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
+
+
 	if d.finalizer != nil {
 		defer d.finalizer()
 	}
@@ -314,7 +333,7 @@ func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 
 	if len(d.watchedServices) == 0 || len(d.watchedTags) != 0 {
 		// We need to watch the catalog.
-		ticker := time.NewTicker(d.refreshInterval)
+		ticker := time.NewTicker(10*time.Second)
 
 		// Watched services and their cancellation functions.
 		services := make(map[string]func())
@@ -431,7 +450,7 @@ func (d *Discovery) watchService(ctx context.Context, ch chan<- []*targetgroup.G
 	}
 
 	go func() {
-		ticker := time.NewTicker(d.refreshInterval)
+		ticker := time.NewTicker(10*time.Second)
 		var lastIndex uint64
 		catalog := srv.client.Catalog()
 		for {
