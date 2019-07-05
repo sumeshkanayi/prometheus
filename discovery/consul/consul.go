@@ -350,11 +350,10 @@ func (d *Discovery) initialize(ctx context.Context) {
 func (p *DisoverArray) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 
 
-	fmt.Println("Discover array is ",p.Discover)
+	fmt.Println("Discover array is ",*(p.Discover)[1])
 
 	for _,d:=range p.Discover{
 
-		level.Info(d.logger).Log("msg", "SIA", "tags")
 		fmt.Println("Watched tags",d.watchedTags)
 		fmt.Println("Watched servicess",d.watchedServices)
 	
@@ -369,7 +368,7 @@ func (p *DisoverArray) Run(ctx context.Context, ch chan<- []*targetgroup.Group) 
 
 	if len(d.watchedServices) == 0 || len(d.watchedTags) != 0 {
 		// We need to watch the catalog.
-		ticker := time.NewTicker(10*time.Second)
+		ticker := time.NewTicker(120*time.Second)
 
 		// Watched services and their cancellation functions.
 		services := make(map[string]func())
@@ -378,12 +377,13 @@ func (p *DisoverArray) Run(ctx context.Context, ch chan<- []*targetgroup.Group) 
 		for {
 			select {
 			case <-ctx.Done():
+				fmt.Println("Context is done uner RUN")
 				ticker.Stop()
 				return
 			default:
 
 				d.watchServices(ctx, ch, &lastIndex, services)
-				//Disabled by SUmesh
+			
 				<-ticker.C
 			}
 		}
@@ -457,7 +457,7 @@ func (d *Discovery) watchServices(ctx context.Context, ch chan<- []*targetgroup.
 			select {
 			case <-ctx.Done():
 				//sumes
-				//return
+				return
 			case ch <- []*targetgroup.Group{{Source: name}}:
 			}
 		}
@@ -477,6 +477,7 @@ type consulService struct {
 
 // Start watching a service.
 func (d *Discovery) watchService(ctx context.Context, ch chan<- []*targetgroup.Group, name string) {
+	fmt.Println("Called watch service with name ",name)
 	srv := &consulService{
 		discovery: d,
 		client:    d.client,
@@ -497,13 +498,18 @@ func (d *Discovery) watchService(ctx context.Context, ch chan<- []*targetgroup.G
 		for {
 			select {
 			case <-ctx.Done():
+				fmt.Println("Gofunc Done")
 				ticker.Stop()
-				//return
+				return
 			default:
+				fmt.Println("calling srv.watch")
 				srv.watch(ctx, ch, catalog, &lastIndex)
 				select {
 				case <-ticker.C:
+					fmt.Println("Ticked")
 				case <-ctx.Done():
+					fmt.Println("Done")
+
 				}
 			}
 		}
@@ -528,7 +534,7 @@ func (srv *consulService) watch(ctx context.Context, ch chan<- []*targetgroup.Gr
 	// Check the context before in order to exit early.
 	select {
 	case <-ctx.Done():
-		//return
+		return
 	default:
 		// Continue.
 	}
@@ -596,9 +602,13 @@ func (srv *consulService) watch(ctx context.Context, ch chan<- []*targetgroup.Gr
 
 		tgroup.Targets = append(tgroup.Targets, labels)
 	}
+	fmt.Println("Finally")
 
 	select {
 	case <-ctx.Done():
+		fmt.Println("Here")
 	case ch <- []*targetgroup.Group{&tgroup}:
+		fmt.Println("No hERE")
+		return
 	}
 }
