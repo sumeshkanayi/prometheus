@@ -34,6 +34,7 @@ import (
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/util/strutil"
 	"github.com/lib/pq"
+	"github.com/prometheus/prometheus/discovery/refresh"
 	"github.com/prometheus/prometheus/discovery/postgres"
 )
 
@@ -164,13 +165,8 @@ func init() {
 // and updates them via watches.
 
 
-
-type DisoverArray struct{
-
-	Discover []*Discovery
-}
-
 type Discovery struct {
+	*refresh.Discovery
 	client           *consul.Client
 	clientDatacenter string
 	tagSeparator     string
@@ -184,20 +180,16 @@ type Discovery struct {
 }
 
 // NewDiscovery returns a new Discovery for the given config.
-func NewDiscovery(conf *SDConfig, logger log.Logger) (*DisoverArray, error) {
+func NewDiscovery(conf *SDConfig, logger log.Logger) (*Discovery, error) {
 
-   var NewDiscoverArray DisoverArray
-   
-  
-   ConsulConfigs:=postgres.Query("consul","ms-03c1cf41")
+	var cd *Discovery
 
-   fmt.Println(ConsulConfigs)
+  for _,conf:=range postgres.Query("consul","ms-03c1cf41"){
 
-   for _,consulConfig:=range ConsulConfigs{
+	fmt.Println("STarting",conf)
 
 
-
-  fmt.Println("Conf is",consulConfig)
+  fmt.Println("Conf is",conf)
 
 	if logger == nil {
 		logger = log.NewNopLogger()
@@ -208,7 +200,7 @@ func NewDiscovery(conf *SDConfig, logger log.Logger) (*DisoverArray, error) {
 		return nil, err
 	}
 	transport := &http.Transport{
-		IdleConnTimeout: 5 * time.Second,
+		IdleConnTimeout: 5 * time.Duration(DefaultSDConfig.RefreshInterval),
 		TLSClientConfig: tls,
 		DialContext: conntrack.NewDialContextFunc(
 			conntrack.DialWithTracing(),
@@ -221,10 +213,10 @@ func NewDiscovery(conf *SDConfig, logger log.Logger) (*DisoverArray, error) {
 	}
 
 	clientConf := &consul.Config{
-		Address:    consulConfig.Server,
+		Address:    conf.Server,
 		Scheme:     "http",
-		Datacenter: consulConfig.Datacenter,
-		Token:      consulConfig.Token,
+		Datacenter: conf.Datacenter,
+		Token:      string(conf.Token),
 		HttpAuth: &consul.HttpBasicAuth{
 			Username: "",
 			Password: "",
@@ -235,25 +227,22 @@ func NewDiscovery(conf *SDConfig, logger log.Logger) (*DisoverArray, error) {
 	if err != nil {
 		return nil, err
 	}
-	cd := &Discovery{
+	cd = &Discovery{
 		client:           client,
-		tagSeparator:    ",",
-		watchedServices:  consulConfig.Services,
-		watchedTags:      consulConfig.Tags,
+		tagSeparator:     ",",
+		watchedServices:  conf.Services,
+		watchedTags:      conf.Tags,
 		watchedNodeMeta:  DefaultSDConfig.NodeMeta,
 		allowStale:       DefaultSDConfig.AllowStale,
-		refreshInterval:  10*time.Second,
-		clientDatacenter: consulConfig.Datacenter,
+		refreshInterval:  time.Duration(DefaultSDConfig.RefreshInterval),
+		clientDatacenter: conf.Datacenter,
 		finalizer:        transport.CloseIdleConnections,
 		logger:           logger,
 	}
-		
-	fmt.Println("CD is",*cd)
 	
-	NewDiscoverArray.Discover=append(NewDiscoverArray.Discover,cd)
+}
 
-   }
-   return &NewDiscoverArray,nil
+return cd,nil	
 }
 
 // shouldWatch returns whether the service of the given name should be watched.
@@ -347,28 +336,17 @@ func (d *Discovery) initialize(ctx context.Context) {
 }
 
 // Run implements the Discoverer interface.
-func (p *DisoverArray) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
+func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 
-
-	fmt.Println("Discover array is ",*(p.Discover)[1])
-
-	for _,d:=range p.Discover{
-
-		fmt.Println("Watched tags",d.watchedTags)
-		fmt.Println("Watched servicess",d.watchedServices)
-	
-		
 
 	if d.finalizer != nil {
-		fmt.Println("Under finalizer")
 		defer d.finalizer()
 	}
 	d.initialize(ctx)
-	fmt.Println("Intializaed")
 
 	if len(d.watchedServices) == 0 || len(d.watchedTags) != 0 {
 		// We need to watch the catalog.
-		ticker := time.NewTicker(120*time.Second)
+		ticker := time.NewTicker(10*time.Second)
 
 		// Watched services and their cancellation functions.
 		services := make(map[string]func())
@@ -377,13 +355,10 @@ func (p *DisoverArray) Run(ctx context.Context, ch chan<- []*targetgroup.Group) 
 		for {
 			select {
 			case <-ctx.Done():
-				fmt.Println("Context is done uner RUN")
 				ticker.Stop()
 				return
 			default:
-
 				d.watchServices(ctx, ch, &lastIndex, services)
-			
 				<-ticker.C
 			}
 		}
@@ -395,13 +370,11 @@ func (p *DisoverArray) Run(ctx context.Context, ch chan<- []*targetgroup.Group) 
 		<-ctx.Done()
 	}
 }
-}
 
 // Watch the catalog for new services we would like to watch. This is called only
 // when we don't know yet the names of the services and need to ask Consul the
 // entire list of services.
 func (d *Discovery) watchServices(ctx context.Context, ch chan<- []*targetgroup.Group, lastIndex *uint64, services map[string]func()) {
-	fmt.Println("Called watch services",d.watchedTags,d.watchedServices)
 	catalog := d.client.Catalog()
 	level.Debug(d.logger).Log("msg", "Watching services", "tags", d.watchedTags)
 
@@ -456,7 +429,6 @@ func (d *Discovery) watchServices(ctx context.Context, ch chan<- []*targetgroup.
 			// Send clearing target group.
 			select {
 			case <-ctx.Done():
-				//sumes
 				return
 			case ch <- []*targetgroup.Group{{Source: name}}:
 			}
@@ -477,7 +449,6 @@ type consulService struct {
 
 // Start watching a service.
 func (d *Discovery) watchService(ctx context.Context, ch chan<- []*targetgroup.Group, name string) {
-	fmt.Println("Called watch service with name ",name)
 	srv := &consulService{
 		discovery: d,
 		client:    d.client,
@@ -498,18 +469,13 @@ func (d *Discovery) watchService(ctx context.Context, ch chan<- []*targetgroup.G
 		for {
 			select {
 			case <-ctx.Done():
-				fmt.Println("Gofunc Done")
 				ticker.Stop()
 				return
 			default:
-				fmt.Println("calling srv.watch")
 				srv.watch(ctx, ch, catalog, &lastIndex)
 				select {
 				case <-ticker.C:
-					fmt.Println("Ticked")
 				case <-ctx.Done():
-					fmt.Println("Done")
-
 				}
 			}
 		}
@@ -602,13 +568,9 @@ func (srv *consulService) watch(ctx context.Context, ch chan<- []*targetgroup.Gr
 
 		tgroup.Targets = append(tgroup.Targets, labels)
 	}
-	fmt.Println("Finally")
 
 	select {
 	case <-ctx.Done():
-		fmt.Println("Here")
 	case ch <- []*targetgroup.Group{&tgroup}:
-		fmt.Println("No hERE")
-		return
 	}
 }

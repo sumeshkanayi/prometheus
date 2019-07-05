@@ -18,30 +18,22 @@ import (
 	"fmt"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
+	
 
 )
 
-type ConsulConfig struct{
-
-	Server string `db:"server"`
-	Tags pq.StringArray `db:"tags"`
-	Services pq.StringArray `db:"services"`
-	Datacenter string `db:"datacenter"`
-	Token string `db:"token"`
-
-
-
+type ConsulSDConfig struct{
+Server string `db:"server"`
+Services pq.StringArray `db:"services"`
+Tags pq.StringArray `db:"tags"`
+Datacenter string `db:"datacenter"`
+Token string `db:"token"`
 
 }
 
+func Query(class string, shard string) []ConsulSDConfig {
 
-
-
-func Query(class string, shard string) []ConsulConfig {
-
-	fmt.Println("Called query")
-
-	var SDConfigs []ConsulConfig
+	var SDConfigs []ConsulSDConfig
 
 	connStr := fmt.Sprintf("user=%s dbname=%s password=%s sslmode=%s host=%s port=%s", "devops_admin", "devops_primary", "admin", "disable", "postgres.bdf-cloud.iqvia.net", "5432")
 	fmt.Println("connection string is", connStr)
